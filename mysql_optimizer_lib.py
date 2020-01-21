@@ -86,11 +86,11 @@ class Optimizer:
         if str(self.get_table_info(table_name)['CREATE_OPTIONS']).find('PACK_KEYS=' + option) == -1:
             self.cursor.execute(f'ALTER TABLE `{table_name}` PACK_KEYS = {option}')
 
-    def row_format(self, table_name, option):
-        option = str(option).upper()
-
-        if str(self.get_table_info(table_name)['CREATE_OPTIONS']).find('ROW_FORMAT=' + option) == -1:
-            self.cursor.execute(f'ALTER TABLE `{table_name}` ROW_FORMAT = {option}')
+    # def row_format(self, table_name, option):
+    #     option = str(option).upper()
+    #
+    #     if str(self.get_table_info(table_name)['CREATE_OPTIONS']).find('ROW_FORMAT=' + option) == -1:
+    #         self.cursor.execute(f'ALTER TABLE `{table_name}` ROW_FORMAT = {option}')
 
     def aria_transactional(self, table_name, option):
         option = str(option)
@@ -200,51 +200,29 @@ class Optimizer:
 
         print('Ok')
 
-    def proc_compress_innodb(self, ignore_tables: list):
+    def row_format(self, table_data, row_format: str):
         console = my_lib.ConsolePrint()
 
-        for row in self.table_status_rows:
-            console.print(f'''Таблица {row['NAME']}''')
+        row_format = row_format.upper()
 
-            last_engine = self.get_table_info(row['NAME'])['ENGINE']
-            last_row_format = self.get_table_info(row['NAME'])['ROW_FORMAT']
-            last_data_length = self.get_table_info(row['NAME'])['DATA_LENGTH']
+        if table_data['ROW_FORMAT'] == row_format:
+            return
 
-            if (
-                    last_row_format != 'COMPRESSED' and
-                    # last_engine != 'INNODB' and
-                    row['NAME'] not in ignore_tables
-            ):
-                self.cursor.execute(f'''
-                        ALTER TABLE `{row['NAME']}`
-                            ENGINE=InnoDB,
-                            ROW_FORMAT=COMPRESSED;                       
-                        ''')
+        table_name = table_data['NAME']
 
-                time.sleep(15)
+        if row_format == 'COMPRESSED' and table_data['ENGINE'] == 'INNODB':
+            console.print(f'{table_name} ROW_FORMAT {row_format} ')
 
-                current_data_length = self.get_table_info(row['NAME'])['DATA_LENGTH']
-                current_engine = self.get_table_info(row['NAME'])['ENGINE']
-                # current_row_format = self.get_table_info(row['NAME'])['ROW_FORMAT']
+            self.cursor.execute(f'ALTER TABLE `{table_name}` ROW_FORMAT={row_format}')
 
-                if current_data_length >= last_data_length:
-                    console.print(
-                        f'Сжатый размер {current_data_length} '
-                        f'больше исходного {last_data_length}, откат обратно'
-                    )
+            console.print('OK')
 
-                    if current_engine != last_engine:
-                        self.set_table_engine(row['NAME'], last_engine)
+        elif row_format in ['COMPACT', 'REDUNDANT', 'DYNAMIC']:
+            console.print(f'{table_name} ROW_FORMAT {row_format} ')
 
-                    if self.get_table_info(row['NAME'])['ROW_FORMAT'] != last_row_format:
-                        self.row_format(row['NAME'], last_row_format)
-                else:
-                    console.print(f"Ok До {last_data_length}  После {current_data_length}")
+            self.cursor.execute(f'ALTER TABLE `{table_name}` ROW_FORMAT={row_format}')
 
-    def proc_row_format(self, row_format):
-        console = my_lib.ConsolePrint()
+            console.print('OK')
 
-        for row in self.table_status_rows:
-            console.print(f'''Таблица {row['NAME']}''')
-
-            self.row_format(row['NAME'], row_format)
+        else:
+            console.print('Не определено')
