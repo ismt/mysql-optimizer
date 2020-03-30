@@ -110,7 +110,14 @@ class Optimizer:
         if str(self.get_table_info(table_name)['CREATE_OPTIONS']).find(' PAGE_CHECKSUM=' + option) == -1:
             self.cursor.execute(f'ALTER TABLE `{table_name}` PAGE_CHECKSUM={option}')
 
-    def set_table_engine(self, table_data, engine, block_rows_count=5000, pack_keys=0, transactoinal=0):
+    def set_table_engine(
+            self,
+            table_data,
+            engine,
+            block_rows_count=5000,
+            pack_keys=0,
+            transactoinal=0
+    ):
 
         con = my_lib.ConsolePrint()
 
@@ -123,31 +130,54 @@ class Optimizer:
 
         con.print(table_name)
 
+        tmp_table = f'{table_name}__tmp_convert_850d68'
+        tmp_table_ids = f'{table_name}__tmp_convert_850d68_ids'
+
+        self.cursor.execute(f'drop table if exists {tmp_table}')
+        self.cursor.execute(f'drop table if exists {tmp_table_ids}')
+
+        sql = ''
+
+        if pack_keys:
+            sql += f' PACK_KEYS={pack_keys} '
+
+        if transactoinal:
+            sql += f' TRANSACTIONAL={transactoinal} '
+
         if engine in ['MYISAM', 'INNODB', 'ARIA']:
-            self.cursor.execute(f'ALTER TABLE `{table_name}` ENGINE = {engine} PACK_KEYS = {pack_keys} TRANSACTIONAL = {transactoinal}')
+            self.cursor.execute(f'ALTER TABLE `{table_name}` ENGINE = {engine} {sql}')
 
             return
 
-        tmp_table = f'{table_name}__tmp_convert_850d68'
-
-        self.cursor.execute(f'drop table if exists {tmp_table}')
         self.cursor.execute(f'''create table {tmp_table} like {table_name}''')
         self.cursor.execute(f'''alter table {tmp_table} engine {engine}''')
 
-        self.cursor.execute(f'''handler {table_name} open''')
+        self.cursor.execute(f'''
+                    CREATE temporary TABLE IF NOT EXISTS `{tmp_table_ids}` (
+                        `id` BIGINT(20) NOT NULL                      
+                    )
+                    COLLATE='utf8_general_ci'
+                    ENGINE=MYISAM
+        ''')
+
+        self.cursor.execute(f'insert into {tmp_table_ids} select id from {table_name}')
+
+        self.cursor.execute(f'''handler {tmp_table_ids} open''')
 
         row_count = 0
 
         while True:
-            self.cursor.execute(f'handler {table_name} read next  limit {block_rows_count}')
+            self.cursor.execute(f'handler {tmp_table_ids} read next limit {block_rows_count}')
 
-            res = self.cursor.fetchall()
+            res_ids = self.cursor.fetchall()
 
-            if not res:
+            if not res_ids:
                 break
 
+            self.cursor.execute(f'select * from {table_name} where id in %s', [tuple(item['id'] for item in res_ids)])
+
             my_lib.insert_bath(
-                row_list=res,
+                row_list=self.cursor.fetchall(),
                 cursor=self.cursor,
                 table_name=tmp_table
             )
@@ -156,7 +186,7 @@ class Optimizer:
 
             con.print(row_count)
 
-        self.cursor.execute(f'handler {table_name} close')
+        self.cursor.execute(f'handler {tmp_table_ids} close')
 
         self.cursor.execute(f'''
                             rename table  
@@ -174,6 +204,7 @@ class Optimizer:
                       ''')
 
         self.cursor.execute(f'drop table if exists {tmp_table}')
+        self.cursor.execute(f'drop table if exists {tmp_table_ids}')
 
     def table_checksum(self, table_name, option):
         option = str(option)
