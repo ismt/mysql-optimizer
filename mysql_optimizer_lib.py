@@ -134,6 +134,8 @@ class Optimizer:
             self.cursor.execute(f'drop table if exists {tmp_table}')
             self.cursor.execute(f'drop table if exists {tmp_table_ids}')
 
+        clear_tmp()
+
         sql = ''
 
         if engine in ['ARIA', 'MYISAM', 'INNODB']:
