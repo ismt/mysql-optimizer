@@ -110,10 +110,10 @@ class Optimizer:
         if str(self.get_table_info(table_name)['CREATE_OPTIONS']).find(' PAGE_CHECKSUM=' + option) == -1:
             self.cursor.execute(f'ALTER TABLE `{table_name}` PAGE_CHECKSUM={option}')
 
-    def set_table_engine(
+    def set_table(
             self,
-            table_data,
-            engine,
+            table_name: str,
+            engine: str,
             block_rows_count=5000,
             pack_keys=0,
             transactoinal=0
@@ -123,29 +123,37 @@ class Optimizer:
 
         engine = str(engine).upper()
 
-        if table_data['ENGINE'] == engine:
-            return
-
-        table_name = table_data['NAME']
+        table_data = self.get_table_info(table_name)
 
         con.print(table_name)
 
         tmp_table = f'{table_name}__tmp_convert_850d68'
         tmp_table_ids = f'{table_name}__tmp_convert_850d68_ids'
 
-        self.cursor.execute(f'drop table if exists {tmp_table}')
-        self.cursor.execute(f'drop table if exists {tmp_table_ids}')
+        def clear_tmp():
+            self.cursor.execute(f'drop table if exists {tmp_table}')
+            self.cursor.execute(f'drop table if exists {tmp_table_ids}')
 
         sql = ''
 
-        if pack_keys:
-            sql += f' PACK_KEYS={pack_keys} '
+        if engine in ['ARIA', 'MYISAM', 'INNODB']:
+            if pack_keys:
+                sql += f' PACK_KEYS=1 '
+            else:
+                sql += f' PACK_KEYS=0 '
 
-        if transactoinal:
-            sql += f' TRANSACTIONAL={transactoinal} '
+        if engine in ['ARIA']:
+            if transactoinal:
+                sql += f' TRANSACTIONAL=1 '
+            else:
+                sql += f' TRANSACTIONAL=0 '
 
-        if engine in ['MYISAM', 'INNODB', 'ARIA']:
-            self.cursor.execute(f'ALTER TABLE `{table_name}` ENGINE = {engine} {sql}')
+        if table_data['ENGINE'].upper() != engine:
+            sql += f' engine={engine} '
+
+        if engine in ['MYISAM', 'INNODB', 'ARIA', 'ARCHIVE', 'CSV']:
+            if sql:
+                self.cursor.execute(f'ALTER TABLE `{table_name}` {sql}')
 
             return
 
@@ -203,8 +211,7 @@ class Optimizer:
                             `{tmp_table}`
                       ''')
 
-        self.cursor.execute(f'drop table if exists {tmp_table}')
-        self.cursor.execute(f'drop table if exists {tmp_table_ids}')
+        clear_tmp()
 
     def table_checksum(self, table_name, option):
         option = str(option)
