@@ -155,63 +155,62 @@ class Optimizer:
             if sql:
                 self.cursor.execute(f'ALTER TABLE `{table_name}` {sql}')
 
-            return
+        else:
+            self.cursor.execute(f'''create table {tmp_table} like {table_name}''')
+            self.cursor.execute(f'''alter table {tmp_table} engine {engine}''')
 
-        self.cursor.execute(f'''create table {tmp_table} like {table_name}''')
-        self.cursor.execute(f'''alter table {tmp_table} engine {engine}''')
+            self.cursor.execute(f'''
+                        CREATE temporary TABLE IF NOT EXISTS `{tmp_table_ids}` (
+                            `id` BIGINT(20) NOT NULL                      
+                        )
+                        COLLATE='utf8_general_ci'
+                        ENGINE=MYISAM
+            ''')
 
-        self.cursor.execute(f'''
-                    CREATE temporary TABLE IF NOT EXISTS `{tmp_table_ids}` (
-                        `id` BIGINT(20) NOT NULL                      
-                    )
-                    COLLATE='utf8_general_ci'
-                    ENGINE=MYISAM
-        ''')
+            self.cursor.execute(f'insert into {tmp_table_ids} select id from {table_name}')
 
-        self.cursor.execute(f'insert into {tmp_table_ids} select id from {table_name}')
+            self.cursor.execute(f'''handler {tmp_table_ids} open''')
 
-        self.cursor.execute(f'''handler {tmp_table_ids} open''')
+            row_count = 0
 
-        row_count = 0
+            while True:
+                self.cursor.execute(f'handler {tmp_table_ids} read next limit {block_rows_count}')
 
-        while True:
-            self.cursor.execute(f'handler {tmp_table_ids} read next limit {block_rows_count}')
+                res_ids = self.cursor.fetchall()
 
-            res_ids = self.cursor.fetchall()
+                if not res_ids:
+                    break
 
-            if not res_ids:
-                break
+                self.cursor.execute(f'select * from {table_name} where id in %s', [tuple(item['id'] for item in res_ids)])
 
-            self.cursor.execute(f'select * from {table_name} where id in %s', [tuple(item['id'] for item in res_ids)])
+                my_lib.insert_bath(
+                    row_list=self.cursor.fetchall(),
+                    cursor=self.cursor,
+                    table_name=tmp_table
+                )
 
-            my_lib.insert_bath(
-                row_list=self.cursor.fetchall(),
-                cursor=self.cursor,
-                table_name=tmp_table
-            )
+                row_count += block_rows_count
 
-            row_count += block_rows_count
+                con.print(row_count)
 
-            con.print(row_count)
+            self.cursor.execute(f'handler {tmp_table_ids} close')
 
-        self.cursor.execute(f'handler {tmp_table_ids} close')
+            self.cursor.execute(f'''
+                                rename table  
+                                `{table_name}`
+                                to 
+                                `{table_name}_backup`  ,
+    
+                                `{tmp_table}`
+                                to 
+                                `{table_name}`  ,
+    
+                                `{table_name}_backup`
+                                to 
+                                `{tmp_table}`
+                          ''')
 
-        self.cursor.execute(f'''
-                            rename table  
-                            `{table_name}`
-                            to 
-                            `{table_name}_backup`  ,
-
-                            `{tmp_table}`
-                            to 
-                            `{table_name}`  ,
-
-                            `{table_name}_backup`
-                            to 
-                            `{tmp_table}`
-                      ''')
-
-        clear_tmp()
+            clear_tmp()
 
     def table_checksum(self, table_name, option):
         option = str(option)
