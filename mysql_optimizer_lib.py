@@ -175,6 +175,11 @@ class Optimizer:
 
             row_count = 0
 
+            self.cursor.execute(f'show columns from `{table_name}`')
+
+            columns = self.cursor.fetchall()
+            columns_str = ','.join('`' + item['Field'] + '`' for item in columns)
+
             while True:
                 self.cursor.execute(f'handler {tmp_table_ids} read next limit {block_rows_count}')
 
@@ -183,13 +188,17 @@ class Optimizer:
                 if not res_ids:
                     break
 
-                self.cursor.execute(f'select * from {table_name} where id in %s', [tuple(item['id'] for item in res_ids)])
+                self.cursor.execute(f'''
+                    insert into {tmp_table} ({columns_str})      
+                    select * from {table_name}
+                    where id in %s
+                ''', [tuple(item['id'] for item in res_ids)])
 
-                my_lib.insert_bath(
-                    row_list=self.cursor.fetchall(),
-                    cursor=self.cursor,
-                    table_name=tmp_table
-                )
+                # my_lib.insert_bath(
+                #     row_list=self.cursor.fetchall(),
+                #     cursor=self.cursor,
+                #     table_name=tmp_table
+                # )
 
                 row_count += block_rows_count
 
